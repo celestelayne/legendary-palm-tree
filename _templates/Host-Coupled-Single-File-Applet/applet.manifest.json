@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org",
+  "applet": {
+    "id": "edu.gsapp.software-inutile.pendulum",
+    "name": "Macchina Inutile — Suspended Spar",
+    "version": "1.0.0",
+    "description": "A zero-utility spatial mobile suspended inside the chat viewport. Translates ambient browser geometry, cursor drift, and conversational drafts into kinetic balance and cast shadows.",
+    "author": "Student Name",
+    "entrypoint": "index.html",
+    "render": {
+      "sandbox": ["allow-scripts"],
+      "preferredHeight": 420,
+      "chromeless": true
+    }
+  },
+  "stateSchema": {
+    "type": "object",
+    "description": "Passive kinetic equilibrium read by the conversational host.",
+    "properties": {
+      "angleRadians": {
+        "type": "number",
+        "description": "Current angular displacement of the balsa spar."
+      },
+      "agitationLevel": {
+        "type": "string",
+        "enum": ["still", "drifting", "turbulent"],
+        "description": "Qualitative summary of environmental air currents."
+      },
+      "idleSeconds": {
+        "type": "number",
+        "description": "Seconds elapsed since the human last disturbed the viewport."
+      }
+    }
+  },
+  "actions": {
+    "disturb_air": {
+      "description": "Introduce a subtle conversational air current into the applet's environment (e.g., when the model responds or changes tone).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "impulse": {
+            "type": "number",
+            "minimum": -1.0,
+            "maximum": 1.0,
+            "description": "Directional breeze strength (-1.0 left draft, +1.0 right draft)."
+          },
+          "temperature": {
+            "type": "string",
+            "enum": ["cool", "warm", "humid"],
+            "description": "Shifts the viscosity/damping of the surrounding air."
+          }
+        },
+        "required": ["impulse"]
+      }
+    }
+  }
+}

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Macchina Inutile — Starter</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #f4f3ef; /* Paper / gallery wall */
+      cursor: crosshair;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <script>
+    const canvas = document.getElementById('stage');
+    const ctx = canvas.getContext('2d');
+
+    // --- 1. ENVIRONMENTAL SENSORS ("Invisible Air Currents") ---
+    const env = {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      winX: window.screenX,
+      winY: window.screenY,
+      winVelocity: 0,       // How fast the browser window is dragged across the monitor
+      cursorX: window.innerWidth / 2,
+      cursorY: window.innerHeight / 2,
+      cursorSpeed: 0,       // How fast the mouse is moving
+      idleFrames: 0,        // How long the user has been completely still
+      ambientVolume: 0,     // 0.0 to 1.0 room noise (activates on first click)
+      micActive: false
+    };
+
+    // Resize canvas crisply for Retina/HiDPI displays
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      env.width = window.innerWidth;
+      env.height = window.innerHeight;
+      canvas.width = env.width * dpr;
+      canvas.height = env.height * dpr;
+      ctx.scale(dpr, dpr);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Track cursor drift & stillness
+    window.addEventListener('mousemove', (e) => {
+      const dx = e.clientX - env.cursorX;
+      const dy = e.clientY - env.cursorY;
+      env.cursorSpeed = Math.min(Math.hypot(dx, dy), 100);
+      env.cursorX = e.clientX;
+      env.cursorY = e.clientY;
+      env.idleFrames = 0;
+    });
+
+    // Optional: Unlock ambient microphone input on first click (no recording)
+    let analyser, audioData;
+    window.addEventListener('click', async () => {
+      if (env.micActive) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioCtx = new AudioContext();
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        audioData = new Uint8Array(analyser.frequencyBinCount);
+        env.micActive = true;
+      } catch (err) {
+        // Fails gracefully if mic is denied; applet still runs on window/cursor physics
+      }
+    }, { once: true });
+
+    // --- 2. KINETIC STATE (Replace/expand with your own spatial forms) ---
+    let angle = 0;
+    let angularVelocity = 0;
+
+    function updateSensors() {
+      // Measure browser window movement across physical monitor
+      const dWinX = window.screenX - env.winX;
+      const dWinY = window.screenY - env.winY;
+      env.winVelocity = Math.hypot(dWinX, dWinY);
+      env.winX = window.screenX;
+      env.winY = window.screenY;
+
+      // Decay cursor speed & increment stillness
+      env.cursorSpeed *= 0.9;
+      env.idleFrames++;
+
+      // Sample ambient room volume if unlocked
+      if (env.micActive && analyser) {
+        analyser.getByteFrequencyData(audioData);
+        const avg = audioData.reduce((sum, v) => sum + v, 0) / audioData.length;
+        env.ambientVolume = avg / 128;
+      }
+    }
+
+    // --- 3. RENDER LOOP (Munari-inspired suspended mobile example) ---
+    function draw(time) {
+      updateSensors();
+      ctx.clearRect(0, 0, env.width, env.height);
+
+      // Combine "air currents" into physical impulse
+      const impulse =
+        (env.winVelocity * 0.002) +
+        (env.cursorSpeed * 0.0005) +
+        (env.ambientVolume * 0.04);
+
+      // Spring-pendulum physics
+      angularVelocity += impulse - Math.sin(angle) * 0.005;
+      angularVelocity *= 0.97; // Air damping
+      angle += angularVelocity;
+
+      const anchorX = env.width / 2;
+      const anchorY = env.height * 0.2;
+      const armLength = Math.min(env.width, env.height) * 0.32;
+
+      const tipX = anchorX + Math.sin(angle) * armLength;
+      const tipY = anchorY + Math.cos(angle) * armLength;
+
+      // Cast shadow on gallery wall (shifts with window position on monitor)
+      const shadowOffsetX = (env.winX % 200) * 0.15 + 24;
+      const shadowOffsetY = 28;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(anchorX + shadowOffsetX, anchorY + shadowOffsetY);
+      ctx.lineTo(tipX + shadowOffsetX, tipY + shadowOffsetY);
+      ctx.stroke();
+
+      // Silk thread (vertical suspension)
+      ctx.strokeStyle = '#999';
+      ctx.lineWidth = 0.75;
+      ctx.beginPath();
+      ctx.moveTo(anchorX, 0);
+      ctx.lineTo(anchorX, anchorY);
+      ctx.stroke();
+
+      // Balsa wood spar
+      ctx.strokeStyle = '#1c1c1c';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(anchorX, anchorY);
+      ctx.lineTo(tipX, tipY);
+      ctx.stroke();
+
+      // Suspended counterweight (expands with ambient room noise or stillness)
+      const radius = 14 + env.ambientVolume * 40 + Math.min(env.idleFrames * 0.02, 25);
+      ctx.fillStyle = '#d9381e'; // Munari vermilion
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      requestAnimationFrame(draw);
+    }
+
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>

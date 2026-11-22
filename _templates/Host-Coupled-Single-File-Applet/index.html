@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Macchina Inutile — Web Applet</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #f4f3ef;
+      cursor: crosshair;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <script>
+    const canvas = document.getElementById('stage');
+    const ctx = canvas.getContext('2d');
+
+    // --- 1. ENVIRONMENTAL SENSORS ---
+    const env = {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      winX: window.screenX,
+      winY: window.screenY,
+      winVelocity: 0,
+      cursorX: window.innerWidth / 2,
+      cursorY: window.innerHeight / 2,
+      cursorSpeed: 0,
+      idleFrames: 0,
+      ambientVolume: 0,
+      micActive: false,
+      hostDraft: 0,         // Injected from conversational host via postMessage
+      airDamping: 0.97      // Modified by host 'temperature'
+    };
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      env.width = window.innerWidth;
+      env.height = window.innerHeight;
+      canvas.width = env.width * dpr;
+      canvas.height = env.height * dpr;
+      ctx.scale(dpr, dpr);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    window.addEventListener('mousemove', (e) => {
+      const dx = e.clientX - env.cursorX;
+      const dy = e.clientY - env.cursorY;
+      env.cursorSpeed = Math.min(Math.hypot(dx, dy), 100);
+      env.cursorX = e.clientX;
+      env.cursorY = e.clientY;
+      env.idleFrames = 0;
+    });
+
+    // Optional mic unlock on single click
+    let analyser, audioData;
+    window.addEventListener('click', async () => {
+      if (env.micActive) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioCtx = new AudioContext();
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        audioData = new Uint8Array(analyser.frequencyBinCount);
+        env.micActive = true;
+      } catch (e) {}
+    }, { once: true });
+
+    // --- 2. WEB APPLET / MCP HOST BRIDGE (postMessage) ---
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (!msg || typeof msg !== 'object') return;
+
+      // Receive action calls from the conversational host (e.g., MCP tool call)
+      if (msg.type === 'applet:action' && msg.action === 'disturb_air') {
+        const { impulse = 0, temperature = 'cool' } = msg.params || {};
+        env.hostDraft += Number(impulse) * 0.08;
+        env.airDamping = temperature === 'humid' ? 0.92 : temperature === 'warm' ? 0.985 : 0.97;
+      }
+    });
+
+    function emitStateToHost(angle, angularVelocity) {
+      if (window.parent === window) return; // Skip if running standalone
+      const speed = Math.abs(angularVelocity);
+      const agitationLevel = speed < 0.002 ? 'still' : speed < 0.02 ? 'drifting' : 'turbulent';
+
+      window.parent.postMessage({
+        type: 'applet:state',
+        appletId: 'edu.gsapp.software-inutile.pendulum',
+        state: {
+          angleRadians: Number(angle.toFixed(3)),
+          agitationLevel,
+          idleSeconds: Math.floor(env.idleFrames / 60)
+        }
+      }, '*');
+    }
+
+    // --- 3. KINETIC LOOP ---
+    let angle = 0;
+    let angularVelocity = 0;
+    let frameCount = 0;
+
+    function updateSensors() {
+      const dWinX = window.screenX - env.winX;
+      const dWinY = window.screenY - env.winY;
+      env.winVelocity = Math.hypot(dWinX, dWinY);
+      env.winX = window.screenX;
+      env.winY = window.screenY;
+
+      env.cursorSpeed *= 0.9;
+      env.hostDraft *= 0.85; // Decay conversational breeze
+      env.idleFrames++;
+
+      if (env.micActive && analyser) {
+        analyser.getByteFrequencyData(audioData);
+        const avg = audioData.reduce((sum, v) => sum + v, 0) / audioData.length;
+        env.ambientVolume = avg / 128;
+      }
+    }
+
+    function draw() {
+      updateSensors();
+      ctx.clearRect(0, 0, env.width, env.height);
+
+      const impulse =
+        (env.winVelocity * 0.002) +
+        (env.cursorSpeed * 0.0005) +
+        (env.ambientVolume * 0.04) +
+        env.hostDraft;
+
+      angularVelocity += impulse - Math.sin(angle) * 0.005;
+      angularVelocity *= env.airDamping;
+      angle += angularVelocity;
+
+      const anchorX = env.width / 2;
+      const anchorY = env.height * 0.2;
+      const armLength = Math.min(env.width, env.height) * 0.32;
+      const tipX = anchorX + Math.sin(angle) * armLength;
+      const tipY = anchorY + Math.cos(angle) * armLength;
+
+      // Cast shadow
+      const shadowOffsetX = (env.winX % 200) * 0.15 + 24;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(anchorX + shadowOffsetX, anchorY + 28);
+      ctx.lineTo(tipX + shadowOffsetX, tipY + 28);
+      ctx.stroke();
+
+      // Silk thread
+      ctx.strokeStyle = '#999';
+      ctx.lineWidth = 0.75;
+      ctx.beginPath();
+      ctx.moveTo(anchorX, 0);
+      ctx.lineTo(anchorX, anchorY);
+      ctx.stroke();
+
+      // Balsa spar
+      ctx.strokeStyle = '#1c1c1c';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(anchorX, anchorY);
+      ctx.lineTo(tipX, tipY);
+      ctx.stroke();
+
+      // Counterweight
+      const radius = 14 + env.ambientVolume * 40 + Math.min(env.idleFrames * 0.02, 25);
+      ctx.fillStyle = '#d9381e';
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Emit passive state to conversational host once per second (~60 frames)
+      if (++frameCount % 60 === 0) {
+        emitStateToHost(angle, angularVelocity);
+      }
+
+      requestAnimationFrame(draw);
+    }
+
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>
